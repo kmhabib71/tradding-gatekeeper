@@ -44,16 +44,37 @@ interface AnalysisResult {
   h4Analysis: string;
   h1Exhaustion: boolean;
   h1Analysis: string;
+  h1LiqSweep: {
+    detected: boolean;
+    level: string;
+    description: string;
+  };
+  h1BoS: {
+    detected: boolean;
+    level: string;
+    description: string;
+  };
   m15Confluence: {
     fvg: boolean;
+    orderBlock: boolean;
+    orderBlockType: string;
     ema20: boolean;
     sr: boolean;
+    zone: string;
     description: string;
   };
   m5Timing: string;
   m5Analysis: string;
   setupGrade: string;
   confidence: number;
+  smcSequence: {
+    h4Trend: boolean;
+    liqSweep: boolean;
+    bos: boolean;
+    entryZone: boolean;
+    timing: boolean;
+    summary: string;
+  };
   traderAssessment: {
     shouldTrade: boolean;
     emotionalRisk: string;
@@ -584,64 +605,117 @@ export default function AnalyzePage() {
                 </div>
               </div>
 
+              {/* SMC Sequence Tracker */}
+              {analysis.smcSequence && (
+                <div className="bg-secondary/50 rounded-xl p-5 border border-border mb-5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-primary mb-3">
+                    SMC Sequence Check
+                  </h3>
+                  <div className="flex gap-2 mb-3 flex-wrap">
+                    {[
+                      { key: "h4Trend", label: "H4 Trend" },
+                      { key: "liqSweep", label: "Liq Sweep" },
+                      { key: "bos", label: "BoS" },
+                      { key: "entryZone", label: "Entry Zone" },
+                      { key: "timing", label: "M5 Timing" },
+                    ].map(({ key, label }) => (
+                      <Badge
+                        key={key}
+                        variant="outline"
+                        className={`text-xs font-bold px-3 py-1 ${
+                          analysis.smcSequence[key as keyof typeof analysis.smcSequence]
+                            ? "text-green-500 border-green-500/30 bg-green-500/10"
+                            : "text-red-500 border-red-500/30 bg-red-500/10"
+                        }`}
+                      >
+                        {analysis.smcSequence[key as keyof typeof analysis.smcSequence] ? "\u2713" : "\u2717"}{" "}
+                        {label}
+                      </Badge>
+                    ))}
+                  </div>
+                  <p className="text-xs text-foreground/60">{analysis.smcSequence.summary}</p>
+                </div>
+              )}
+
               {/* Timeframe Breakdown */}
               <div className="grid grid-cols-2 gap-3 mb-5">
+                {/* H4 */}
                 <div className="bg-secondary/50 rounded-xl p-4 border border-border">
                   <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
-                    H4 Bias
+                    H4 Structure & Bias
                   </h4>
                   <p className="text-sm text-foreground/80">{analysis.h4Analysis}</p>
                 </div>
+
+                {/* H1 Exhaustion + Liq Sweep + BoS */}
                 <div className="bg-secondary/50 rounded-xl p-4 border border-border">
                   <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
-                    H1 Exhaustion
+                    H1 Exhaustion & Sweep
                   </h4>
-                  <p className="text-sm text-foreground/80">{analysis.h1Analysis}</p>
+                  <p className="text-sm text-foreground/80 mb-2">{analysis.h1Analysis}</p>
+                  {analysis.h1LiqSweep && (
+                    <div className="flex items-start gap-1.5 text-xs mb-1">
+                      <Badge variant="outline" className={`text-[10px] shrink-0 ${analysis.h1LiqSweep.detected ? "text-green-500 border-green-500/30" : "text-red-500 border-red-500/30"}`}>
+                        Sweep {analysis.h1LiqSweep.detected ? "\u2713" : "\u2717"}
+                      </Badge>
+                      <span className="text-foreground/60">{analysis.h1LiqSweep.description}</span>
+                    </div>
+                  )}
+                  {analysis.h1BoS && (
+                    <div className="flex items-start gap-1.5 text-xs">
+                      <Badge variant="outline" className={`text-[10px] shrink-0 ${analysis.h1BoS.detected ? "text-green-500 border-green-500/30" : "text-red-500 border-red-500/30"}`}>
+                        BoS {analysis.h1BoS.detected ? "\u2713" : "\u2717"}
+                      </Badge>
+                      <span className="text-foreground/60">{analysis.h1BoS.description}</span>
+                    </div>
+                  )}
                 </div>
+
+                {/* M15 Confluence */}
                 <div className="bg-secondary/50 rounded-xl p-4 border border-border">
                   <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
-                    M15 Confluence
+                    M15 Confluence Zone
                   </h4>
-                  <p className="text-sm text-foreground/80">
+                  <p className="text-sm text-foreground/80 mb-1">
                     {analysis.m15Confluence.description}
                   </p>
-                  <div className="flex gap-2 mt-2">
-                    <Badge
-                      variant="outline"
-                      className={
-                        analysis.m15Confluence.fvg
-                          ? "text-green-500 border-green-500/30"
-                          : "text-red-500 border-red-500/30"
-                      }
-                    >
+                  {analysis.m15Confluence.zone && (
+                    <p className="text-xs font-mono text-primary font-bold mb-2">
+                      Zone: {analysis.m15Confluence.zone}
+                    </p>
+                  )}
+                  <div className="flex gap-1.5 flex-wrap">
+                    <Badge variant="outline" className={`text-[10px] ${analysis.m15Confluence.fvg ? "text-green-500 border-green-500/30" : "text-red-500 border-red-500/30"}`}>
                       FVG {analysis.m15Confluence.fvg ? "\u2713" : "\u2717"}
                     </Badge>
-                    <Badge
-                      variant="outline"
-                      className={
-                        analysis.m15Confluence.ema20
-                          ? "text-green-500 border-green-500/30"
-                          : "text-red-500 border-red-500/30"
-                      }
-                    >
+                    <Badge variant="outline" className={`text-[10px] ${analysis.m15Confluence.orderBlock ? "text-green-500 border-green-500/30" : "text-red-500 border-red-500/30"}`}>
+                      {analysis.m15Confluence.orderBlockType && analysis.m15Confluence.orderBlockType !== "none"
+                        ? `${analysis.m15Confluence.orderBlockType === "internal" ? "Int OB" : analysis.m15Confluence.orderBlockType === "breaker" ? "Breaker" : "OB"}`
+                        : "OB"}{" "}
+                      {analysis.m15Confluence.orderBlock ? "\u2713" : "\u2717"}
+                    </Badge>
+                    <Badge variant="outline" className={`text-[10px] ${analysis.m15Confluence.ema20 ? "text-green-500 border-green-500/30" : "text-red-500 border-red-500/30"}`}>
                       20EMA {analysis.m15Confluence.ema20 ? "\u2713" : "\u2717"}
                     </Badge>
-                    <Badge
-                      variant="outline"
-                      className={
-                        analysis.m15Confluence.sr
-                          ? "text-green-500 border-green-500/30"
-                          : "text-red-500 border-red-500/30"
-                      }
-                    >
+                    <Badge variant="outline" className={`text-[10px] ${analysis.m15Confluence.sr ? "text-green-500 border-green-500/30" : "text-red-500 border-red-500/30"}`}>
                       S/R {analysis.m15Confluence.sr ? "\u2713" : "\u2717"}
                     </Badge>
                   </div>
                 </div>
+
+                {/* M5 Timing */}
                 <div className="bg-secondary/50 rounded-xl p-4 border border-border">
                   <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
-                    M5 Timing
+                    M5 Entry Timing
                   </h4>
+                  <Badge variant="outline" className={`text-[10px] mb-2 ${
+                    analysis.m5Timing === "READY" ? "text-green-500 border-green-500/30 bg-green-500/10"
+                    : analysis.m5Timing === "WAIT" ? "text-yellow-500 border-yellow-500/30 bg-yellow-500/10"
+                    : analysis.m5Timing === "MISSED" ? "text-red-500 border-red-500/30 bg-red-500/10"
+                    : "text-muted-foreground border-border"
+                  }`}>
+                    {analysis.m5Timing}
+                  </Badge>
                   <p className="text-sm text-foreground/80">{analysis.m5Analysis}</p>
                 </div>
               </div>

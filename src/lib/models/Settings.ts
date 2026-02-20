@@ -11,6 +11,9 @@ export interface ISettings extends Document {
   claudeApiKey: string;
   accountType: string;
   accountSize: number;
+  scannerEnabled: boolean;
+  scanIntervalMinutes: number;
+  scannerPairs: string[];
 }
 
 const SettingsSchema = new Schema<ISettings>(
@@ -25,6 +28,9 @@ const SettingsSchema = new Schema<ISettings>(
     claudeApiKey: { type: String, default: "" },
     accountType: { type: String, default: "ftmo" },
     accountSize: { type: Number, default: 10000 },
+    scannerEnabled: { type: Boolean, default: false },
+    scanIntervalMinutes: { type: Number, default: 15 },
+    scannerPairs: { type: [String], default: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD"] },
   },
   { timestamps: true }
 );

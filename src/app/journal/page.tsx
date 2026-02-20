@@ -20,16 +20,37 @@ interface AIAnalysis {
   h4Analysis?: string;
   h1Exhaustion?: boolean;
   h1Analysis?: string;
+  h1LiqSweep?: {
+    detected?: boolean;
+    level?: string;
+    description?: string;
+  };
+  h1BoS?: {
+    detected?: boolean;
+    level?: string;
+    description?: string;
+  };
   m15Confluence?: {
     fvg?: boolean;
+    orderBlock?: boolean;
+    orderBlockType?: string;
     ema20?: boolean;
     sr?: boolean;
+    zone?: string;
     description?: string;
   };
   m5Timing?: string;
   m5Analysis?: string;
   setupGrade?: string;
   confidence?: number;
+  smcSequence?: {
+    h4Trend?: boolean;
+    liqSweep?: boolean;
+    bos?: boolean;
+    entryZone?: boolean;
+    timing?: boolean;
+    summary?: string;
+  };
   traderAssessment?: {
     shouldTrade?: boolean;
     emotionalRisk?: string;
@@ -370,6 +391,33 @@ export default function JournalPage() {
                         </div>
                       )}
 
+                      {/* SMC Sequence */}
+                      {ai.smcSequence && (
+                        <div className="bg-background/50 rounded-lg p-3 border border-border mb-4">
+                          <h4 className="text-[10px] font-bold uppercase tracking-wider text-primary mb-2">
+                            SMC Sequence
+                          </h4>
+                          <div className="flex gap-1.5 flex-wrap mb-2">
+                            {[
+                              { key: "h4Trend", label: "H4 Trend" },
+                              { key: "liqSweep", label: "Liq Sweep" },
+                              { key: "bos", label: "BoS" },
+                              { key: "entryZone", label: "Entry Zone" },
+                              { key: "timing", label: "M5 Timing" },
+                            ].map(({ key, label }) => (
+                              <Badge key={key} variant="outline" className={`text-[10px] ${
+                                ai.smcSequence?.[key as keyof typeof ai.smcSequence]
+                                  ? "text-green-500 border-green-500/30"
+                                  : "text-red-500 border-red-500/30"
+                              }`}>
+                                {ai.smcSequence?.[key as keyof typeof ai.smcSequence] ? "\u2713" : "\u2717"} {label}
+                              </Badge>
+                            ))}
+                          </div>
+                          <p className="text-[10px] text-foreground/60">{ai.smcSequence.summary}</p>
+                        </div>
+                      )}
+
                       {/* Timeframe breakdown */}
                       <div className="grid grid-cols-2 gap-2 mb-4">
                         {ai.h4Analysis && (
@@ -383,9 +431,25 @@ export default function JournalPage() {
                         {ai.h1Analysis && (
                           <div className="bg-background/50 rounded-lg p-3 border border-border">
                             <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
-                              H1 Exhaustion: {ai.h1Exhaustion ? "Yes" : "No"}
+                              H1 Exhaustion & Sweep
                             </h4>
-                            <p className="text-xs text-foreground/70">{ai.h1Analysis}</p>
+                            <p className="text-xs text-foreground/70 mb-1.5">{ai.h1Analysis}</p>
+                            {ai.h1LiqSweep && (
+                              <div className="flex items-start gap-1 text-[10px] mb-1">
+                                <Badge variant="outline" className={`text-[10px] shrink-0 ${ai.h1LiqSweep.detected ? "text-green-500 border-green-500/30" : "text-red-500 border-red-500/30"}`}>
+                                  Sweep {ai.h1LiqSweep.detected ? "\u2713" : "\u2717"}
+                                </Badge>
+                                <span className="text-foreground/50">{ai.h1LiqSweep.description}</span>
+                              </div>
+                            )}
+                            {ai.h1BoS && (
+                              <div className="flex items-start gap-1 text-[10px]">
+                                <Badge variant="outline" className={`text-[10px] shrink-0 ${ai.h1BoS.detected ? "text-green-500 border-green-500/30" : "text-red-500 border-red-500/30"}`}>
+                                  BoS {ai.h1BoS.detected ? "\u2713" : "\u2717"}
+                                </Badge>
+                                <span className="text-foreground/50">{ai.h1BoS.description}</span>
+                              </div>
+                            )}
                           </div>
                         )}
                         {ai.m15Confluence && (
@@ -393,10 +457,19 @@ export default function JournalPage() {
                             <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
                               M15 Confluence
                             </h4>
-                            <p className="text-xs text-foreground/70 mb-1.5">{ai.m15Confluence.description}</p>
-                            <div className="flex gap-1.5">
+                            <p className="text-xs text-foreground/70 mb-1">{ai.m15Confluence.description}</p>
+                            {ai.m15Confluence.zone && (
+                              <p className="text-[10px] font-mono text-primary font-bold mb-1.5">Zone: {ai.m15Confluence.zone}</p>
+                            )}
+                            <div className="flex gap-1 flex-wrap">
                               <Badge variant="outline" className={`text-[10px] ${ai.m15Confluence.fvg ? "text-green-500 border-green-500/30" : "text-red-500 border-red-500/30"}`}>
                                 FVG {ai.m15Confluence.fvg ? "\u2713" : "\u2717"}
+                              </Badge>
+                              <Badge variant="outline" className={`text-[10px] ${ai.m15Confluence.orderBlock ? "text-green-500 border-green-500/30" : "text-red-500 border-red-500/30"}`}>
+                                {ai.m15Confluence.orderBlockType && ai.m15Confluence.orderBlockType !== "none"
+                                  ? `${ai.m15Confluence.orderBlockType === "internal" ? "Int OB" : ai.m15Confluence.orderBlockType === "breaker" ? "Breaker" : "OB"}`
+                                  : "OB"}{" "}
+                                {ai.m15Confluence.orderBlock ? "\u2713" : "\u2717"}
                               </Badge>
                               <Badge variant="outline" className={`text-[10px] ${ai.m15Confluence.ema20 ? "text-green-500 border-green-500/30" : "text-red-500 border-red-500/30"}`}>
                                 20EMA {ai.m15Confluence.ema20 ? "\u2713" : "\u2717"}
@@ -410,8 +483,16 @@ export default function JournalPage() {
                         {ai.m5Analysis && (
                           <div className="bg-background/50 rounded-lg p-3 border border-border">
                             <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
-                              M5 Timing: {ai.m5Timing}
+                              M5 Timing
                             </h4>
+                            <Badge variant="outline" className={`text-[10px] mb-1.5 ${
+                              ai.m5Timing === "READY" ? "text-green-500 border-green-500/30"
+                              : ai.m5Timing === "WAIT" ? "text-yellow-500 border-yellow-500/30"
+                              : ai.m5Timing === "MISSED" ? "text-red-500 border-red-500/30"
+                              : "text-muted-foreground border-border"
+                            }`}>
+                              {ai.m5Timing}
+                            </Badge>
                             <p className="text-xs text-foreground/70">{ai.m5Analysis}</p>
                           </div>
                         )}

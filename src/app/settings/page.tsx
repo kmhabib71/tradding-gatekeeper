@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 
+const ALL_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "EURJPY", "NZDUSD"];
+
 interface SettingsData {
   accountBalance: number;
   riskPercentage: number;
@@ -20,6 +22,9 @@ interface SettingsData {
   claudeApiKey: string;
   accountType: string;
   accountSize: number;
+  scannerEnabled: boolean;
+  scanIntervalMinutes: number;
+  scannerPairs: string[];
 }
 
 export default function SettingsPage() {
@@ -34,6 +39,9 @@ export default function SettingsPage() {
     claudeApiKey: "",
     accountType: "the5ers",
     accountSize: 2500,
+    scannerEnabled: false,
+    scanIntervalMinutes: 15,
+    scannerPairs: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD"],
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -206,6 +214,81 @@ export default function SettingsPage() {
                   className="bg-secondary border-border"
                 />
               </div>
+            </div>
+          </div>
+
+          {/* Auto Scanner */}
+          <div className="bg-card border border-border rounded-xl p-6">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-primary mb-5">
+              Auto Scanner
+            </h2>
+
+            <div className="flex items-center justify-between mb-5 p-4 bg-secondary/50 rounded-lg">
+              <div>
+                <Label className="text-sm font-bold block">Scanner Enabled</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Pre-filter runs every N minutes during kill zones. Press F11 in bridge to start.
+                </p>
+              </div>
+              <Switch
+                checked={settings.scannerEnabled}
+                onCheckedChange={(checked) =>
+                  setSettings((s) => ({ ...s, scannerEnabled: checked }))
+                }
+              />
+            </div>
+
+            <div className="mb-5">
+              <Label className="text-xs text-muted-foreground mb-1.5 block">
+                Scan Interval (minutes)
+              </Label>
+              <Input
+                type="number"
+                min={5}
+                max={60}
+                value={settings.scanIntervalMinutes}
+                onChange={(e) =>
+                  setSettings((s) => ({
+                    ...s,
+                    scanIntervalMinutes: parseInt(e.target.value) || 15,
+                  }))
+                }
+                className="bg-secondary border-border max-w-[200px]"
+              />
+            </div>
+
+            <div>
+              <Label className="text-xs text-muted-foreground mb-2.5 block">
+                Scanner Pairs
+              </Label>
+              <div className="flex gap-2 flex-wrap">
+                {ALL_PAIRS.map((p) => {
+                  const isSelected = settings.scannerPairs.includes(p);
+                  return (
+                    <button
+                      key={p}
+                      onClick={() =>
+                        setSettings((s) => ({
+                          ...s,
+                          scannerPairs: isSelected
+                            ? s.scannerPairs.filter((x) => x !== p)
+                            : [...s.scannerPairs, p],
+                        }))
+                      }
+                      className={`px-4 py-2 rounded-lg text-sm font-bold tracking-wider transition-all ${
+                        isSelected
+                          ? "bg-primary/15 border-2 border-primary text-primary"
+                          : "bg-secondary border-2 border-border text-muted-foreground hover:border-muted-foreground"
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                More pairs = more setups. 4-5 pairs is ideal for 5-8 weekly A/A+ setups.
+              </p>
             </div>
           </div>
 

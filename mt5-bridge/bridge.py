@@ -9,8 +9,10 @@ Usage:
   3. python bridge.py
 
 Controls:
-  - Press F9 to capture screenshot + data and send to Gatekeeper
+  - Press F9  to capture screenshot + data and send to Gatekeeper
   - Press F10 to refresh account data only (no screenshot)
+  - Press F11 to start auto-scanner (pre-filter every 15 min during kill zones)
+  - Press F12 to stop auto-scanner
   - Press Ctrl+Q to quit
 """
 
@@ -21,6 +23,7 @@ import json
 import base64
 import io
 import os
+import threading
 from datetime import datetime
 from PIL import ImageGrab
 import requests
@@ -31,7 +34,21 @@ GATEKEEPER_URL = os.environ.get("GATEKEEPER_URL", "http://localhost:3000")
 GATEKEEPER_PASSWORD = os.environ.get("GATEKEEPER_PASSWORD", "gatekeeper123")
 CAPTURE_HOTKEY = "F9"
 REFRESH_HOTKEY = "F10"
+SCAN_START_HOTKEY = "F11"
+SCAN_STOP_HOTKEY = "F12"
 QUIT_HOTKEY = "ctrl+q"
+
+# MT5 timeframe mapping for OHLC data
+TIMEFRAME_MAP = {
+    "H4": mt5.TIMEFRAME_H4,
+    "H1": mt5.TIMEFRAME_H1,
+    "M15": mt5.TIMEFRAME_M15,
+    "M5": mt5.TIMEFRAME_M5,
+}
+
+# Scanner state
+scanner_running = False
+scanner_thread = None
 
 
 def connect_mt5():
@@ -199,6 +216,180 @@ def send_to_gatekeeper(cookies, data):
         return False
 
 
+def get_ohlc_data(symbol, timeframe_str, count=50):
+    """Fetch OHLC candle data for a symbol and timeframe"""
+    tf = TIMEFRAME_MAP.get(timeframe_str)
+    if tf is None:
+        return None
+
+    # Ensure symbol is available in Market Watch
+    mt5.symbol_select(symbol, True)
+
+    rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
+    if rates is None or len(rates) == 0:
+        return None
+
+    result = []
+    for r in rates:
+        result.append({
+            "time": int(r["time"]),
+            "open": float(r["open"]),
+            "high": float(r["high"]),
+            "low": float(r["low"]),
+            "close": float(r["close"]),
+            "volume": int(r["tick_volume"]),
+        })
+    return result
+
+
+def auto_scan(cookies):
+    """Automated scan loop - runs every N minutes, sends OHLC to pre-filter"""
+    global scanner_running
+
+    print("[SCANNER] Auto-scanner started. Checking settings each cycle...")
+
+    while scanner_running:
+        try:
+            # 1. Fetch settings from Gatekeeper
+            settings_res = requests.get(
+                f"{GATEKEEPER_URL}/api/scanner/control",
+                cookies=cookies,
+                timeout=5,
+            )
+            if settings_res.status_code != 200:
+                print("[SCANNER] Failed to fetch settings, retrying in 30s...")
+                time.sleep(30)
+                continue
+
+            settings = settings_res.json()
+            if not settings.get("scannerEnabled", False):
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] [SCANNER] Disabled in settings, checking again in 30s...")
+                time.sleep(30)
+                continue
+
+            pairs = settings.get("scannerPairs", ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD"])
+            interval = settings.get("scanIntervalMinutes", 15)
+
+            # 2. Fetch OHLC data for all pairs
+            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] [SCANNER] Scanning {len(pairs)} pairs...")
+            all_ohlc = {}
+            for pair in pairs:
+                pair_data = {}
+                for tf in ["H4", "H1", "M15", "M5"]:
+                    candles = get_ohlc_data(pair, tf, 50)
+                    if candles:
+                        pair_data[tf.lower()] = candles
+                if len(pair_data) == 4:  # All 4 timeframes available
+                    all_ohlc[pair] = pair_data
+                else:
+                    print(f"  [SCANNER] {pair}: Missing timeframe data, skipping")
+
+            if not all_ohlc:
+                print("[SCANNER] No valid OHLC data collected, retrying next cycle")
+                _scanner_sleep(interval * 60)
+                continue
+
+            # 3. Send to pre-filter endpoint
+            prefilter_res = requests.post(
+                f"{GATEKEEPER_URL}/api/scanner/prefilter",
+                json={"pairs": all_ohlc},
+                cookies=cookies,
+                timeout=30,
+            )
+
+            if prefilter_res.status_code == 200:
+                result = prefilter_res.json()
+                triggered = result.get("triggeredPairs", [])
+                results = result.get("results", {})
+
+                # Print summary for each pair
+                for pair, data in results.items():
+                    status = "PASS" if data["passed"] else "FAIL"
+                    reasons = ", ".join(data["reasons"]) if data["reasons"] else "no conditions met"
+                    print(f"  [SCANNER] {pair}: {status} ({reasons})")
+
+                if triggered:
+                    print(f"\n  >>> SETUP POTENTIAL DETECTED: {', '.join(triggered)}")
+                    print(f"  >>> Open Gatekeeper -> Analyze, select the pair, and capture screenshot with F9")
+                else:
+                    print(f"  [SCANNER] No pairs triggered. Waiting {interval} min...")
+            else:
+                print(f"[SCANNER] Pre-filter request failed: {prefilter_res.status_code}")
+
+            # 4. Sleep for the interval
+            _scanner_sleep(interval * 60)
+
+        except Exception as e:
+            print(f"[SCANNER] Error: {e}")
+            time.sleep(60)
+
+    print("[SCANNER] Auto-scanner stopped.")
+
+
+def _scanner_sleep(seconds):
+    """Sleep in 1-second increments so scanner can be stopped quickly"""
+    for _ in range(seconds):
+        if not scanner_running:
+            break
+        time.sleep(1)
+
+
+def on_scan_start():
+    """Start the auto-scanner"""
+    global scanner_running, scanner_thread
+
+    if scanner_running:
+        print("[SCANNER] Already running")
+        return
+
+    cookies = login_to_gatekeeper()
+    if not cookies:
+        print("[SCANNER] Cannot start - authentication failed")
+        return
+
+    # Enable in settings
+    try:
+        requests.post(
+            f"{GATEKEEPER_URL}/api/scanner/control",
+            json={"action": "start"},
+            cookies=cookies,
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+    scanner_running = True
+    scanner_thread = threading.Thread(target=auto_scan, args=(cookies,), daemon=True)
+    scanner_thread.start()
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] [SCANNER] Started (F12 to stop)")
+
+
+def on_scan_stop():
+    """Stop the auto-scanner"""
+    global scanner_running
+
+    if not scanner_running:
+        print("[SCANNER] Not running")
+        return
+
+    scanner_running = False
+
+    # Disable in settings
+    cookies = login_to_gatekeeper()
+    if cookies:
+        try:
+            requests.post(
+                f"{GATEKEEPER_URL}/api/scanner/control",
+                json={"action": "stop"},
+                cookies=cookies,
+                timeout=5,
+            )
+        except Exception:
+            pass
+
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] [SCANNER] Stopping...")
+
+
 def on_capture():
     """Handle capture hotkey press"""
     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Capturing MT5 data + screenshot...")
@@ -280,6 +471,8 @@ def main():
     print(f"\nHotkeys:")
     print(f"  {CAPTURE_HOTKEY}     - Capture screenshot + data -> send to Gatekeeper")
     print(f"  {REFRESH_HOTKEY}    - Refresh account data only")
+    print(f"  {SCAN_START_HOTKEY}    - Start auto-scanner (pre-filter every N min)")
+    print(f"  {SCAN_STOP_HOTKEY}    - Stop auto-scanner")
     print(f"  {QUIT_HOTKEY} - Quit")
     print(f"\nGatekeeper URL: {GATEKEEPER_URL}")
     print("\nWaiting for hotkey press...\n")
@@ -287,11 +480,15 @@ def main():
     # Register hotkeys
     keyboard.add_hotkey(CAPTURE_HOTKEY, on_capture)
     keyboard.add_hotkey(REFRESH_HOTKEY, on_refresh)
+    keyboard.add_hotkey(SCAN_START_HOTKEY, on_scan_start)
+    keyboard.add_hotkey(SCAN_STOP_HOTKEY, on_scan_stop)
 
     # Wait for quit
     keyboard.wait(QUIT_HOTKEY)
 
     print("\nShutting down...")
+    global scanner_running
+    scanner_running = False
     mt5.shutdown()
     print("Done.")
 

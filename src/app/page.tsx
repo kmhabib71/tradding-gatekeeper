@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/layout/Navbar";
 import { Button } from "@/components/ui/button";
@@ -24,10 +24,55 @@ interface Stats {
   }>;
 }
 
+interface ScannerStatus {
+  scannerEnabled: boolean;
+  lastScanTime: string | null;
+  lastCycleResults: Array<{
+    pair: string;
+    prefilterPassed: boolean;
+    prefilterReasons: string[];
+    prefilterDetails: {
+      h4TrendDirection: string;
+      h4TrendClarity: boolean;
+      premiumDiscountZone: string;
+      inKillZone: boolean;
+      killZoneName: string;
+      h1SweepDetected: boolean;
+      h1MaxWickRatio: number;
+      h1Displacement: boolean;
+      h1BodyRatio: number;
+    };
+    setupGrade: string;
+    overallVerdict: string;
+    confidence: number;
+  }>;
+  recentAlerts: Array<{
+    pair: string;
+    setupGrade: string;
+    overallVerdict: string;
+    confidence: number;
+    timestamp: string;
+  }>;
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [scanner, setScanner] = useState<ScannerStatus | null>(null);
+  const [togglingScanner, setTogglingScanner] = useState(false);
   const router = useRouter();
+
+  const fetchScannerStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/scanner/status");
+      if (res.ok) {
+        const data = await res.json();
+        setScanner(data);
+      }
+    } catch {
+      // Silent
+    }
+  }, []);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -38,9 +83,16 @@ export default function DashboardPage() {
         return;
       }
       fetchStats();
+      fetchScannerStatus();
     };
     checkAuth();
-  }, [router]);
+  }, [router, fetchScannerStatus]);
+
+  // Poll scanner status every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(fetchScannerStatus, 30000);
+    return () => clearInterval(interval);
+  }, [fetchScannerStatus]);
 
   const fetchStats = async () => {
     try {
@@ -53,6 +105,25 @@ export default function DashboardPage() {
       // Stats will show as empty
     } finally {
       setLoading(false);
+    }
+  };
+
+  const toggleScanner = async () => {
+    setTogglingScanner(true);
+    try {
+      const action = scanner?.scannerEnabled ? "stop" : "start";
+      const res = await fetch("/api/scanner/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (res.ok) {
+        await fetchScannerStatus();
+      }
+    } catch {
+      // Silent
+    } finally {
+      setTogglingScanner(false);
     }
   };
 
@@ -92,6 +163,173 @@ export default function DashboardPage() {
             </Button>
           </Link>
         </div>
+
+        {/* Scanner Panel */}
+        {scanner && (
+          <div className="mb-8 space-y-4">
+            {/* Scanner Alert - A/A+ Setup Detected */}
+            {scanner.recentAlerts.length > 0 && (
+              <div className="bg-yellow-500/5 border-2 border-yellow-500/30 rounded-xl p-5 animate-pulse">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-wider text-yellow-500 mb-1">
+                      Setup Detected
+                    </h3>
+                    <div className="flex gap-2 flex-wrap">
+                      {scanner.recentAlerts.map((alert, i) => (
+                        <Badge
+                          key={i}
+                          variant="outline"
+                          className="text-sm font-bold border-yellow-500/30 text-yellow-500 bg-yellow-500/10"
+                        >
+                          {alert.pair} - {alert.setupGrade} ({alert.confidence}%)
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                  <Link href="/analyze">
+                    <Button className="bg-yellow-500 text-black font-bold hover:bg-yellow-400">
+                      Analyze Now
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            )}
+
+            {/* Scanner Status Card */}
+            <div className="bg-card border border-border rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-2.5 h-2.5 rounded-full ${
+                      scanner.scannerEnabled
+                        ? "bg-green-500 animate-pulse"
+                        : "bg-muted-foreground/30"
+                    }`}
+                  />
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    Auto Scanner
+                  </h3>
+                  {scanner.lastScanTime && (
+                    <span className="text-[10px] text-muted-foreground/60">
+                      Last scan: {new Date(scanner.lastScanTime).toLocaleTimeString()}
+                    </span>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={toggleScanner}
+                  disabled={togglingScanner}
+                  className={`text-xs font-bold ${
+                    scanner.scannerEnabled
+                      ? "border-red-500/30 text-red-500 hover:bg-red-500/10"
+                      : "border-green-500/30 text-green-500 hover:bg-green-500/10"
+                  }`}
+                >
+                  {togglingScanner
+                    ? "..."
+                    : scanner.scannerEnabled
+                    ? "Stop Scanner"
+                    : "Start Scanner"}
+                </Button>
+              </div>
+
+              {/* Pair Results */}
+              {scanner.lastCycleResults.length > 0 ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {scanner.lastCycleResults.map((result) => (
+                    <div
+                      key={result.pair}
+                      className={`rounded-lg p-3 border ${
+                        result.prefilterPassed
+                          ? "bg-green-500/5 border-green-500/20"
+                          : "bg-secondary/50 border-border"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-sm font-bold">{result.pair}</span>
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] ${
+                            result.prefilterPassed
+                              ? "text-green-500 border-green-500/30"
+                              : "text-muted-foreground border-border"
+                          }`}
+                        >
+                          {result.prefilterPassed ? "PASS" : "FAIL"}
+                        </Badge>
+                      </div>
+                      <div className="flex gap-1 flex-wrap">
+                        <Badge
+                          variant="outline"
+                          className={`text-[9px] px-1.5 py-0 ${
+                            result.prefilterDetails?.h4TrendDirection !== "RANGING"
+                              ? "text-green-500 border-green-500/20"
+                              : "text-muted-foreground/50 border-border"
+                          }`}
+                        >
+                          {result.prefilterDetails?.h4TrendDirection?.[0] || "?"}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={`text-[9px] px-1.5 py-0 ${
+                            result.prefilterDetails?.inKillZone
+                              ? "text-green-500 border-green-500/20"
+                              : "text-muted-foreground/50 border-border"
+                          }`}
+                        >
+                          KZ
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={`text-[9px] px-1.5 py-0 ${
+                            result.prefilterDetails?.h1SweepDetected
+                              ? "text-green-500 border-green-500/20"
+                              : "text-muted-foreground/50 border-border"
+                          }`}
+                        >
+                          SW
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={`text-[9px] px-1.5 py-0 ${
+                            result.prefilterDetails?.h1Displacement
+                              ? "text-green-500 border-green-500/20"
+                              : "text-muted-foreground/50 border-border"
+                          }`}
+                        >
+                          DP
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={`text-[9px] px-1.5 py-0 ${
+                            result.prefilterDetails?.premiumDiscountZone !== "EQUILIBRIUM"
+                              ? "text-green-500 border-green-500/20"
+                              : "text-muted-foreground/50 border-border"
+                          }`}
+                        >
+                          {result.prefilterDetails?.premiumDiscountZone?.[0] || "?"}
+                        </Badge>
+                      </div>
+                      {result.setupGrade && (
+                        <div className="mt-1.5 text-xs font-bold text-primary">
+                          AI: {result.setupGrade} - {result.overallVerdict}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground text-center py-3">
+                  {scanner.scannerEnabled
+                    ? "Waiting for first scan cycle... (Press F11 in MT5 Bridge)"
+                    : "Scanner is off. Enable it to auto-detect setups across multiple pairs."}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Today's Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
