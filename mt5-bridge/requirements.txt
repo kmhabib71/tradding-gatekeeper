@@ -1,0 +1,4 @@
+MetaTrader5
+Pillow
+requests
+keyboard
