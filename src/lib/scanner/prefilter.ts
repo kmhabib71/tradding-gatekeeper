@@ -225,7 +225,7 @@ export function checkH1Sweep(
   }
 
   return {
-    detected: maxWickRatio >= 0.65,
+    detected: maxWickRatio >= 0.5,
     maxWickRatio: Math.round(maxWickRatio * 100) / 100,
   };
 }

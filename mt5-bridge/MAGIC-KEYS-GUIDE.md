@@ -3,19 +3,32 @@
 ## How It Works
 
 **SWITCH** sets your direction (BUY or SELL) — shown in the status bar.
-**OPEN TRADE** executes the trade instantly using that direction.
-**ENTER** is currently a no-op placeholder.
+**OPEN TRADE** draws SL (red) / TP (green) / Entry (blue) lines on the chart.
+**Drag the SL line** — lot size auto-recalculates to maintain your risk %.
+**ENTER** confirms and places the trade with the exact SL/TP/lots shown.
+
+Requires **MagicKeysBridge.mq5** EA running on the chart (auto-copied on first launch).
 
 ---
 
-## Current Flow to Place a Trade
+## Flow to Place a Trade
 
 1. **INPUT RISK** → set your risk % or fixed $
-2. **INPUT PIPS** → set your SL distance in pips
+2. **INPUT PIPS** → set default SL distance in pips
 3. **SWITCH** → toggle BUY or SELL (shown top-right)
 4. **MARKET/PENDING** → choose order type (shown top-right)
-5. **OPEN TRADE** → executes the order with auto lot size
-6. **ENTER** → does nothing right now
+5. **OPEN TRADE** → draws SL/TP/Entry lines on chart + shows info labels
+6. **Drag the red SL line** on the chart → lots recalculate, TP moves to maintain R:R
+7. **Drag the green TP line** to adjust take profit / R:R
+8. **ENTER** → executes the trade with the final line positions
+9. Press **OPEN TRADE** again to cancel (removes lines)
+
+## First-Time Setup
+
+1. Launch `python magic_keys.py` — it auto-copies `MagicKeysBridge.mq5` to MT5's Experts folder
+2. In MT5: Navigator → Expert Advisors → right-click → Refresh
+3. Drag **MagicKeysBridge** onto the chart you trade on
+4. Enable **Algo Trading** in MT5 toolbar (green button)
 
 ---
 
@@ -47,7 +60,7 @@
 |--------|--------|
 | **AUTO BE** | Moves SL to breakeven (entry price) for selected position |
 | **OPEN CALC** | Shows lot size calculator popup — displays calculated lots based on current risk/SL/symbol |
-| **OPEN TRADE** | **PLACES THE TRADE** — market or pending order using current direction, risk, SL pips, and auto-calculated lot size |
+| **OPEN TRADE** | **SHOWS SL/TP LINES ON CHART** — red SL line, green TP line, blue entry line. Drag SL to adjust lot size. Press ENTER to execute. Press OPEN TRADE again to cancel. |
 | **DOUBLE ORDER** | Repeats the exact same order as the last OPEN TRADE (same symbol, direction, lots, SL, TP) |
 | **ZOOM OUT** | Sends zoom out command to MT5 chart |
 
@@ -77,16 +90,7 @@
 | **SWITCH** | Toggles direction between BUY and SELL (shown in status bar, green/red) |
 | **MARKET/PENDING** | Toggles order mode — MARKET (instant) or PENDING (asks for entry price) |
 | **SHOW STATS** | Popup: account balance, equity, P/L, margin, open positions list |
-| **ENTER** | Currently does nothing — placeholder |
-
----
-
-## What Should ENTER Do?
-
-Options:
-- **A)** Same as OPEN TRADE (redundant confirm button)
-- **B)** Confirm pending actions (e.g. after setting up SL/TP lines, ENTER confirms)
-- **C)** Remove it / leave as-is
+| **ENTER** | **CONFIRMS THE TRADE** — reads final SL/TP/lots from chart lines and places the order. Only works after OPEN TRADE draws lines. |
 
 ---
 

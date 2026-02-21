@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 
-const ALL_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "EURJPY", "NZDUSD"];
+const ALL_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "GBPJPY"];
 
 interface SettingsData {
   accountBalance: number;
@@ -41,7 +41,7 @@ export default function SettingsPage() {
     accountSize: 2500,
     scannerEnabled: false,
     scanIntervalMinutes: 15,
-    scannerPairs: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD"],
+    scannerPairs: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "GBPJPY"],
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

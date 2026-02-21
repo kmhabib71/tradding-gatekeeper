@@ -30,7 +30,7 @@ const SettingsSchema = new Schema<ISettings>(
     accountSize: { type: Number, default: 10000 },
     scannerEnabled: { type: Boolean, default: false },
     scanIntervalMinutes: { type: Number, default: 15 },
-    scannerPairs: { type: [String], default: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD"] },
+    scannerPairs: { type: [String], default: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "GBPJPY"] },
   },
   { timestamps: true }
 );

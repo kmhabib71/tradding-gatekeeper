@@ -14,7 +14,9 @@ from tkinter import simpledialog, messagebox
 import json
 import os
 import sys
+import shutil
 import threading
+import time
 from datetime import datetime
 
 try:
@@ -69,17 +71,86 @@ def save_config(cfg):
 # ============================================================================
 
 _mt5_connected = False
+_mt5_files_path = None  # MQL5/Files/ sandbox path
 
 
 def ensure_mt5():
     """Initialize MT5 if not already connected."""
-    global _mt5_connected
+    global _mt5_connected, _mt5_files_path
     if _mt5_connected:
         return True
     if not mt5.initialize():
         return False
     _mt5_connected = True
+    # Discover MQL5/Files/ path for EA communication
+    info = mt5.terminal_info()
+    if info and info.data_path:
+        _mt5_files_path = os.path.join(info.data_path, "MQL5", "Files")
+        os.makedirs(_mt5_files_path, exist_ok=True)
     return True
+
+
+def get_mt5_files_path():
+    """Return the MQL5/Files/ sandbox path."""
+    ensure_mt5()
+    return _mt5_files_path
+
+
+def install_ea_if_needed():
+    """Copy MagicKeysBridge.mq5 to MT5 Experts folder if not already there."""
+    ensure_mt5()
+    info = mt5.terminal_info()
+    if info is None:
+        return
+    experts_dir = os.path.join(info.data_path, "MQL5", "Experts")
+    ea_src = os.path.join(os.path.dirname(__file__), "MagicKeysBridge.mq5")
+    ea_dst = os.path.join(experts_dir, "MagicKeysBridge.mq5")
+    if os.path.exists(ea_src) and not os.path.exists(ea_dst):
+        try:
+            shutil.copy2(ea_src, ea_dst)
+            print(f"[OK] Copied MagicKeysBridge.mq5 to {experts_dir}")
+            print("     In MT5: Navigator > Expert Advisors > Refresh > Drag onto chart")
+        except Exception as e:
+            print(f"[WARN] Could not copy EA: {e}")
+    elif os.path.exists(ea_dst):
+        # Update if source is newer
+        if os.path.exists(ea_src) and os.path.getmtime(ea_src) > os.path.getmtime(ea_dst):
+            try:
+                shutil.copy2(ea_src, ea_dst)
+                print(f"[OK] Updated MagicKeysBridge.mq5")
+            except Exception:
+                pass
+
+
+def write_ea_command(cmd_dict):
+    """Write a command JSON file for the EA to read."""
+    files_path = get_mt5_files_path()
+    if files_path is None:
+        print("[WARN] MT5 files path not available")
+        return False
+    filepath = os.path.join(files_path, "python_to_ea.json")
+    try:
+        with open(filepath, "w") as f:
+            json.dump(cmd_dict, f)
+        return True
+    except Exception as e:
+        print(f"[WARN] Could not write command: {e}")
+        return False
+
+
+def read_ea_response():
+    """Read the response JSON file from the EA."""
+    files_path = get_mt5_files_path()
+    if files_path is None:
+        return None
+    filepath = os.path.join(files_path, "ea_to_python.json")
+    if not os.path.exists(filepath):
+        return None
+    try:
+        with open(filepath, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def get_account():
@@ -432,6 +503,8 @@ class MagicKeysApp:
         self.current_tf_idx = 5     # H4 default
         self.last_order = None      # for DOUBLE ORDER
         self.status_text = tk.StringVar(value="Ready")
+        self.lines_active = False   # True when SL/TP lines are shown on chart
+        self._poll_id = None        # tkinter after() ID for EA polling
 
         # Window drag state
         self._drag_x = 0
@@ -450,6 +523,7 @@ class MagicKeysApp:
 
     def _init_mt5(self):
         if ensure_mt5():
+            install_ea_if_needed()
             acc = get_account()
             if acc:
                 self.status_text.set(f"MT5: {acc['name']} | ${acc['balance']:.0f}")
@@ -459,6 +533,9 @@ class MagicKeysApp:
             self.status_text.set("MT5: NOT CONNECTED")
 
     def _on_close(self):
+        # Clean up chart lines if active
+        if self.lines_active:
+            write_ea_command({"action": "clear_lines"})
         # Save window position
         try:
             geo = self.root.geometry()
@@ -894,48 +971,61 @@ class MagicKeysApp:
                   command=win.destroy).pack(pady=10)
 
     def cmd_open_trade(self):
-        """Place a market or pending order."""
-        symbol = self._get_symbol()
-        acc = get_account()
-        if acc is None:
-            self._show_msg("Cannot read account")
+        """Show SL/TP lines on chart. Press ENTER to confirm the trade."""
+        # If lines already active, cancel them
+        if self.lines_active:
+            self._cancel_lines()
             return
 
-        sl_pips = self.cfg["sl_pips"]
-        rr = self.cfg["default_rr"]
-        tp_pips = sl_pips * rr
-        lots = calculate_lots(acc["balance"], self.cfg["risk_percent"],
-                              self.cfg["risk_fixed"], sl_pips, symbol)
-
-        if self.mode == "MARKET":
-            result = place_market_order(symbol, self.direction, lots, sl_pips, tp_pips)
-        else:
-            # For pending, ask entry price
-            tick = get_tick(symbol)
-            if tick is None:
-                self._show_msg("Cannot get price")
-                return
-            current = tick.ask if self.direction == "BUY" else tick.bid
-            price_str = simpledialog.askstring(
-                "Pending Order", f"Entry price for {self.direction} {symbol}:\n(Current: {current})",
-                parent=self.root
-            )
-            if price_str is None:
-                return
-            try:
-                entry_price = float(price_str)
-            except ValueError:
-                self._show_msg("Invalid price")
-                return
-            result = place_pending_order(symbol, self.direction, lots, sl_pips, tp_pips, entry_price)
-
-        # Save for double order
-        self.last_order = {
-            "symbol": symbol, "direction": self.direction, "lots": lots,
-            "sl_pips": sl_pips, "tp_pips": tp_pips,
+        # Send show_lines command to EA
+        cmd = {
+            "action": "show_lines",
+            "direction": self.direction,
+            "risk_percent": self.cfg["risk_percent"],
+            "risk_fixed": self.cfg["risk_fixed"],
+            "sl_pips": self.cfg["sl_pips"],
+            "rr": self.cfg["default_rr"],
         }
+        if write_ea_command(cmd):
+            self.lines_active = True
+            self._show_msg("Lines on chart — drag SL/TP, press ENTER to execute")
+            self._start_ea_polling()
+        else:
+            self._show_msg("EA bridge not available — is MagicKeysBridge on chart?")
 
-        self._show_msg(result)
+    def _cancel_lines(self):
+        """Cancel the line preview and clean up."""
+        write_ea_command({"action": "clear_lines"})
+        self.lines_active = False
+        self._stop_ea_polling()
+        self._show_msg("Cancelled")
+
+    def _start_ea_polling(self):
+        """Start polling EA response file to update info bar."""
+        self._stop_ea_polling()
+
+        def poll():
+            if not self.lines_active:
+                return
+            resp = read_ea_response()
+            if resp and resp.get("active"):
+                lots = resp.get("lots", 0)
+                sl_pips = resp.get("sl_pips", 0)
+                tp_pips = resp.get("tp_pips", 0)
+                rr = resp.get("rr_ratio", 0)
+                risk = resp.get("risk_amount", 0)
+                self.info_label.config(
+                    text=f"Lots: {lots:.2f} | SL: {sl_pips:.1f} pips | TP: {tp_pips:.1f} pips | R:R 1:{rr:.1f} | Risk: ${risk:.0f}"
+                )
+            self._poll_id = self.root.after(500, poll)
+
+        self._poll_id = self.root.after(500, poll)
+
+    def _stop_ea_polling(self):
+        """Stop polling EA response."""
+        if self._poll_id is not None:
+            self.root.after_cancel(self._poll_id)
+            self._poll_id = None
 
     def cmd_double_order(self):
         """Repeat the last order."""
@@ -1129,8 +1219,128 @@ class MagicKeysApp:
                   command=win.destroy).pack(pady=10)
 
     def cmd_enter(self):
-        """Confirm / enter key — context-dependent."""
-        self._show_msg("ENTER pressed")
+        """Confirm and execute the trade using current SL/TP lines from chart."""
+        if not self.lines_active:
+            self._show_msg("Press OPEN TRADE first to show lines")
+            return
+
+        # Read final values from EA
+        resp = read_ea_response()
+        if resp is None or not resp.get("active"):
+            self._show_msg("No line data from EA — is MagicKeysBridge on chart?")
+            return
+
+        symbol = resp.get("symbol", self._get_symbol())
+        direction = resp.get("direction", self.direction)
+        lots = resp.get("lots", 0.01)
+        sl_price = resp.get("sl_price", 0)
+        tp_price = resp.get("tp_price", 0)
+        entry_price = resp.get("entry_price", 0)
+
+        if lots <= 0 or sl_price <= 0:
+            self._show_msg("Invalid trade parameters from EA")
+            return
+
+        # Execute the trade
+        if self.mode == "MARKET":
+            result = self._place_market_with_prices(symbol, direction, lots, sl_price, tp_price)
+        else:
+            result = self._place_pending_with_prices(symbol, direction, lots, sl_price, tp_price, entry_price)
+
+        # Save for DOUBLE ORDER
+        sl_pips = resp.get("sl_pips", 0)
+        tp_pips = resp.get("tp_pips", 0)
+        self.last_order = {
+            "symbol": symbol, "direction": direction, "lots": lots,
+            "sl_pips": sl_pips, "tp_pips": tp_pips,
+        }
+
+        # Clear lines
+        write_ea_command({"action": "clear_lines"})
+        self.lines_active = False
+        self._stop_ea_polling()
+        self._show_msg(result)
+
+    def _place_market_with_prices(self, symbol, direction, lots, sl_price, tp_price):
+        """Place market order using exact SL/TP prices from chart lines."""
+        if not ensure_mt5():
+            return "MT5 not connected"
+
+        info = get_symbol_info(symbol)
+        tick = get_tick(symbol)
+        if info is None or tick is None:
+            return f"Cannot get info for {symbol}"
+
+        digits = info.digits
+        price = tick.ask if direction == "BUY" else tick.bid
+        price = round(price, digits)
+        sl = round(sl_price, digits)
+        tp = round(tp_price, digits)
+        order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
+
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": lots,
+            "type": order_type,
+            "price": price,
+            "sl": sl,
+            "tp": tp,
+            "deviation": 20,
+            "magic": 123456,
+            "comment": "MagicKeys",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+
+        result = mt5.order_send(request)
+        if result is None:
+            return f"Order failed: {mt5.last_error()}"
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            return f"Order failed: {result.comment} (code {result.retcode})"
+        return f"OK: {direction} {lots} {symbol} @ {price} SL={sl} TP={tp}"
+
+    def _place_pending_with_prices(self, symbol, direction, lots, sl_price, tp_price, entry_price):
+        """Place pending order using exact prices from chart lines."""
+        if not ensure_mt5():
+            return "MT5 not connected"
+
+        info = get_symbol_info(symbol)
+        tick = get_tick(symbol)
+        if info is None or tick is None:
+            return f"Cannot get info for {symbol}"
+
+        digits = info.digits
+        entry = round(entry_price, digits)
+        sl = round(sl_price, digits)
+        tp = round(tp_price, digits)
+
+        if direction == "BUY":
+            order_type = mt5.ORDER_TYPE_BUY_LIMIT if entry < tick.ask else mt5.ORDER_TYPE_BUY_STOP
+        else:
+            order_type = mt5.ORDER_TYPE_SELL_LIMIT if entry > tick.bid else mt5.ORDER_TYPE_SELL_STOP
+
+        request = {
+            "action": mt5.TRADE_ACTION_PENDING,
+            "symbol": symbol,
+            "volume": lots,
+            "type": order_type,
+            "price": entry,
+            "sl": sl,
+            "tp": tp,
+            "deviation": 20,
+            "magic": 123456,
+            "comment": "MagicKeys",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+
+        result = mt5.order_send(request)
+        if result is None:
+            return f"Pending failed: {mt5.last_error()}"
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            return f"Pending failed: {result.comment} (code {result.retcode})"
+        return f"OK: Pending {direction} {lots} {symbol} @ {entry}"
 
     def run(self):
         self.root.mainloop()

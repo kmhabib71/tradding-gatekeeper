@@ -7,7 +7,7 @@
   "partial_sl_lock_pips": 10.0,
   "sl_in_profit_pips": 5.0,
   "opacity": 0.92,
-  "win_x": 100,
-  "win_y": 100,
+  "win_x": 567,
+  "win_y": 330,
   "close_custom_percent": 50.0
 }
