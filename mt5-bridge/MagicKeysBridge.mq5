@@ -58,6 +58,7 @@ int OnInit()
 
    EventSetMillisecondTimer(InpPollMs);
    Print("[MagicKeys] Bridge EA started. Polling every ", InpPollMs, "ms");
+   Print("[MagicKeys] Files path: MQL5/Files/ (terminal sandbox)");
    return INIT_SUCCEEDED;
 }
 
@@ -228,22 +229,43 @@ void ReadCommand()
    if(!FileIsExist(FILE_CMD))
       return;
 
-   int fh = FileOpen(FILE_CMD, FILE_READ | FILE_TXT | FILE_ANSI);
+   // Read file as binary to avoid any encoding/BOM issues
+   int fh = FileOpen(FILE_CMD, FILE_READ | FILE_BIN);
    if(fh == INVALID_HANDLE)
+   {
+      Print("[MagicKeys] Cannot open command file");
       return;
+   }
 
-   string content = "";
-   while(!FileIsEnding(fh))
-      content += FileReadString(fh);
+   int fileSize = (int)FileSize(fh);
+   if(fileSize <= 0)
+   {
+      FileClose(fh);
+      return;
+   }
+
+   // Read raw bytes into a char array
+   uchar bytes[];
+   ArrayResize(bytes, fileSize);
+   FileReadArray(fh, bytes);
    FileClose(fh);
+
+   // Convert bytes to string
+   string content = CharArrayToString(bytes, 0, fileSize, CP_UTF8);
+
+   Print("[MagicKeys] File read OK, size=", fileSize, " content=", content);
 
    // Skip if same command (already processed)
    if(content == g_lastCmdHash)
+   {
+      Print("[MagicKeys] Same command, skipping");
       return;
+   }
    g_lastCmdHash = content;
 
-   // Simple JSON parsing (no external libs needed)
+   // Simple JSON parsing
    string action = JsonGetString(content, "action");
+   Print("[MagicKeys] Parsed action='", action, "'");
 
    if(action == "show_lines")
    {
@@ -252,6 +274,8 @@ void ReadCommand()
       g_riskFixed   = JsonGetDouble(content, "risk_fixed");
       g_rrRatio     = JsonGetDouble(content, "rr");
       double slPips = JsonGetDouble(content, "sl_pips");
+
+      Print("[MagicKeys] direction=", g_direction, " risk%=", g_riskPercent, " rr=", g_rrRatio, " sl_pips=", slPips);
 
       if(g_direction == "")   g_direction = "BUY";
       if(g_riskPercent <= 0)  g_riskPercent = InpRiskPercent;
@@ -277,6 +301,10 @@ void ReadCommand()
          WriteResponse();
          ChartRedraw();
       }
+   }
+   else
+   {
+      Print("[MagicKeys] Unknown action: '", action, "' from content: ", content);
    }
 
    // Delete the command file after processing
@@ -454,13 +482,6 @@ void ClearLines()
 //+------------------------------------------------------------------+
 void WriteResponse()
 {
-   int fh = FileOpen(FILE_RESP, FILE_WRITE | FILE_TXT | FILE_ANSI);
-   if(fh == INVALID_HANDLE)
-   {
-      Print("[MagicKeys] Failed to write response file");
-      return;
-   }
-
    string json = "{";
    json += "\"symbol\":\"" + _Symbol + "\",";
    json += "\"direction\":\"" + g_direction + "\",";
@@ -475,7 +496,18 @@ void WriteResponse()
    json += "\"active\":" + (g_linesActive ? "true" : "false");
    json += "}";
 
-   FileWriteString(fh, json);
+   // Write as binary to avoid encoding issues
+   uchar bytes[];
+   StringToCharArray(json, bytes, 0, StringLen(json), CP_UTF8);
+
+   int fh = FileOpen(FILE_RESP, FILE_WRITE | FILE_BIN);
+   if(fh == INVALID_HANDLE)
+   {
+      Print("[MagicKeys] Failed to write response file");
+      return;
+   }
+
+   FileWriteArray(fh, bytes);
    FileClose(fh);
 }
 

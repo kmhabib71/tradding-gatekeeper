@@ -82,11 +82,12 @@ def ensure_mt5():
     if not mt5.initialize():
         return False
     _mt5_connected = True
-    # Discover MQL5/Files/ path for EA communication
+    # Use terminal's own MQL5/Files/ sandbox for EA communication
     info = mt5.terminal_info()
     if info and info.data_path:
         _mt5_files_path = os.path.join(info.data_path, "MQL5", "Files")
         os.makedirs(_mt5_files_path, exist_ok=True)
+        print(f"[OK] File bridge path: {_mt5_files_path}")
     return True
 
 
@@ -105,21 +106,13 @@ def install_ea_if_needed():
     experts_dir = os.path.join(info.data_path, "MQL5", "Experts")
     ea_src = os.path.join(os.path.dirname(__file__), "MagicKeysBridge.mq5")
     ea_dst = os.path.join(experts_dir, "MagicKeysBridge.mq5")
-    if os.path.exists(ea_src) and not os.path.exists(ea_dst):
+    if os.path.exists(ea_src):
         try:
             shutil.copy2(ea_src, ea_dst)
             print(f"[OK] Copied MagicKeysBridge.mq5 to {experts_dir}")
-            print("     In MT5: Navigator > Expert Advisors > Refresh > Drag onto chart")
+            print("     IMPORTANT: Open MetaEditor (F4), open the file, press F7 to compile!")
         except Exception as e:
             print(f"[WARN] Could not copy EA: {e}")
-    elif os.path.exists(ea_dst):
-        # Update if source is newer
-        if os.path.exists(ea_src) and os.path.getmtime(ea_src) > os.path.getmtime(ea_dst):
-            try:
-                shutil.copy2(ea_src, ea_dst)
-                print(f"[OK] Updated MagicKeysBridge.mq5")
-            except Exception:
-                pass
 
 
 def write_ea_command(cmd_dict):
@@ -130,8 +123,10 @@ def write_ea_command(cmd_dict):
         return False
     filepath = os.path.join(files_path, "python_to_ea.json")
     try:
-        with open(filepath, "w") as f:
-            json.dump(cmd_dict, f)
+        text = json.dumps(cmd_dict, separators=(',', ':'))
+        with open(filepath, "w", encoding="ascii", newline="") as f:
+            f.write(text)
+        print(f"[DEBUG] Wrote command: {text}")
         return True
     except Exception as e:
         print(f"[WARN] Could not write command: {e}")
