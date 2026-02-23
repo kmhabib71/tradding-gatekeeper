@@ -27,6 +27,7 @@ input int    InpPollMs        = 200;    // File poll interval (ms)
 #define LABEL_SL     "MK_LabelSL"
 #define LABEL_TP     "MK_LabelTP"
 #define LABEL_INFO   "MK_LabelInfo"
+#define LABEL_TIMER  "MK_CandleTimer"
 
 // === FILE NAMES ===
 #define FILE_CMD     "python_to_ea.json"
@@ -35,6 +36,10 @@ input int    InpPollMs        = 200;    // File poll interval (ms)
 // === STATE ===
 bool   g_linesActive = false;
 string g_direction   = "BUY";
+
+// Timer state — track server-local time offset so countdown works between ticks
+datetime g_lastServerTime  = 0;
+datetime g_lastLocalTime   = 0;
 double g_riskPercent = 1.0;
 double g_riskFixed   = 0.0;
 double g_rrRatio     = 2.0;
@@ -57,6 +62,7 @@ int OnInit()
    g_rrRatio     = InpDefaultRR;
 
    EventSetMillisecondTimer(InpPollMs);
+   CreateCandleTimer();
    Print("[MagicKeys] Bridge EA started. Polling every ", InpPollMs, "ms");
    Print("[MagicKeys] Files path: MQL5/Files/ (terminal sandbox)");
    return INIT_SUCCEEDED;
@@ -69,6 +75,7 @@ void OnDeinit(const int reason)
 {
    EventKillTimer();
    ClearLines();
+   ObjectDelete(0, LABEL_TIMER);
    Comment("");
    Print("[MagicKeys] Bridge EA stopped");
 }
@@ -79,6 +86,7 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
    ReadCommand();
+   UpdateCandleTimer();
 }
 
 //+------------------------------------------------------------------+
@@ -560,11 +568,118 @@ double JsonGetDouble(string json, string key)
 }
 
 //+------------------------------------------------------------------+
+//| Create the candle countdown timer label                           |
+//+------------------------------------------------------------------+
+void CreateCandleTimer()
+{
+   // Delete first in case it exists from a previous init
+   ObjectDelete(0, LABEL_TIMER);
+
+   if(!ObjectCreate(0, LABEL_TIMER, OBJ_LABEL, 0, 0, 0))
+   {
+      Print("[MagicKeys] WARN: Failed to create timer label, error=", GetLastError());
+      return;
+   }
+   ObjectSetInteger(0, LABEL_TIMER, OBJPROP_CORNER, CORNER_RIGHT_UPPER);
+   ObjectSetInteger(0, LABEL_TIMER, OBJPROP_XDISTANCE, 5);
+   ObjectSetInteger(0, LABEL_TIMER, OBJPROP_YDISTANCE, 2);
+   ObjectSetInteger(0, LABEL_TIMER, OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
+   ObjectSetString(0, LABEL_TIMER, OBJPROP_FONT, "Consolas");
+   ObjectSetInteger(0, LABEL_TIMER, OBJPROP_FONTSIZE, 11);
+   ObjectSetInteger(0, LABEL_TIMER, OBJPROP_COLOR, clrWhite);
+   ObjectSetInteger(0, LABEL_TIMER, OBJPROP_BACK, false);
+   ObjectSetInteger(0, LABEL_TIMER, OBJPROP_SELECTABLE, false);
+   ObjectSetString(0, LABEL_TIMER, OBJPROP_TEXT, "Timer...");
+   ChartRedraw();
+   Print("[MagicKeys] Candle timer label created");
+}
+
+//+------------------------------------------------------------------+
+//| Estimate current server time using local clock between ticks      |
+//+------------------------------------------------------------------+
+datetime GetEstimatedServerTime()
+{
+   // TimeCurrent() only updates on ticks. Between ticks, estimate
+   // server time by adding the local time elapsed since last tick.
+   datetime serverNow = TimeCurrent();
+   datetime localNow  = TimeLocal();
+
+   // If we got a fresh tick (server time changed), update the offset
+   if(serverNow != g_lastServerTime)
+   {
+      g_lastServerTime = serverNow;
+      g_lastLocalTime  = localNow;
+      return serverNow;
+   }
+
+   // No new tick — estimate by adding local elapsed time
+   if(g_lastServerTime > 0 && g_lastLocalTime > 0)
+   {
+      int elapsed = (int)(localNow - g_lastLocalTime);
+      if(elapsed < 0) elapsed = 0;
+      return g_lastServerTime + elapsed;
+   }
+
+   return serverNow;
+}
+
+//+------------------------------------------------------------------+
+//| Update the candle countdown display                               |
+//+------------------------------------------------------------------+
+void UpdateCandleTimer()
+{
+   // Get the chart's current timeframe in seconds
+   int tfSeconds = PeriodSeconds(Period());
+   if(tfSeconds <= 0)
+      return;
+
+   // Get the open time of the current (last) bar
+   datetime barTime = iTime(_Symbol, Period(), 0);
+   if(barTime == 0)
+      return;
+
+   // Use estimated server time so countdown ticks between real ticks
+   datetime now = GetEstimatedServerTime();
+   int remaining = (int)(barTime + tfSeconds - now);
+   if(remaining < 0)
+      remaining = 0;
+
+   // Build countdown string — seconds only for minute charts
+   ENUM_TIMEFRAMES tf = Period();
+   int hours   = remaining / 3600;
+   int minutes = (remaining % 3600) / 60;
+   int seconds = remaining % 60;
+
+   bool isMinuteChart = (tf == PERIOD_M1 || tf == PERIOD_M5 || tf == PERIOD_M15 || tf == PERIOD_M30);
+
+   string countdown = "";
+   if(hours > 0)
+      countdown = StringFormat("%d:%02d", hours, minutes);
+   else if(isMinuteChart)
+      countdown = StringFormat("%02d:%02d", minutes, seconds);
+   else
+      countdown = StringFormat("%02d min", minutes);
+
+   // Color shifts from white -> yellow -> red as candle nears close
+   color timerColor = clrWhite;
+   double pctLeft = (tfSeconds > 0) ? (double)remaining / tfSeconds : 1.0;
+   if(pctLeft <= 0.05)       timerColor = clrRed;        // last 5%
+   else if(pctLeft <= 0.15)  timerColor = clrOrangeRed;  // last 15%
+   else if(pctLeft <= 0.25)  timerColor = clrOrange;     // last 25%
+
+   string display = "  " + countdown + "  ";
+
+   ObjectSetString(0, LABEL_TIMER, OBJPROP_TEXT, display);
+   ObjectSetInteger(0, LABEL_TIMER, OBJPROP_COLOR, timerColor);
+   ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
 //| Tick handler — keep entry line at current price                   |
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // Optionally update entry line to track live price
-   // (disabled: entry stays at price when OPEN TRADE was pressed)
+   // Update timer on each tick as well for responsiveness
+   UpdateCandleTimer();
 }
 //+------------------------------------------------------------------+
