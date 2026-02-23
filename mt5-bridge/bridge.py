@@ -9,6 +9,7 @@ Usage:
   3. python bridge.py
 
 Controls:
+  - Press F8  to minimize/restore the console window
   - Press F9  to capture screenshot + data and send to Gatekeeper
   - Press F10 to refresh account data only (no screenshot)
   - Press F11 to start auto-scanner (pre-filter every 15 min during kill zones)
@@ -28,6 +29,7 @@ from datetime import datetime
 from PIL import ImageGrab
 import requests
 import keyboard
+import ctypes
 
 # === CONFIG ===
 GATEKEEPER_URL = os.environ.get("GATEKEEPER_URL", "http://localhost:3000")
@@ -36,6 +38,7 @@ CAPTURE_HOTKEY = "F9"
 REFRESH_HOTKEY = "F10"
 SCAN_START_HOTKEY = "F11"
 SCAN_STOP_HOTKEY = "F12"
+MINIMIZE_HOTKEY = "F8"
 QUIT_HOTKEY = "ctrl+q"
 
 # MT5 timeframe mapping for OHLC data
@@ -49,6 +52,33 @@ TIMEFRAME_MAP = {
 # Scanner state
 scanner_running = False
 scanner_thread = None
+
+# Console window state
+console_minimized = False
+
+
+def get_console_window():
+    """Get the handle to the console window"""
+    return ctypes.windll.kernel32.GetConsoleWindow()
+
+
+def on_minimize_toggle():
+    """Toggle minimize/restore of the console window"""
+    global console_minimized
+    hwnd = get_console_window()
+    if hwnd == 0:
+        return
+
+    SW_MINIMIZE = 6
+    SW_RESTORE = 9
+
+    if console_minimized:
+        ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+        ctypes.windll.user32.SetForegroundWindow(hwnd)
+        console_minimized = False
+    else:
+        ctypes.windll.user32.ShowWindow(hwnd, SW_MINIMIZE)
+        console_minimized = True
 
 
 def connect_mt5():
@@ -469,6 +499,7 @@ def main():
         print(f"Equity:  ${account['equity']:.2f}")
 
     print(f"\nHotkeys:")
+    print(f"  {MINIMIZE_HOTKEY}     - Minimize/restore console window")
     print(f"  {CAPTURE_HOTKEY}     - Capture screenshot + data -> send to Gatekeeper")
     print(f"  {REFRESH_HOTKEY}    - Refresh account data only")
     print(f"  {SCAN_START_HOTKEY}    - Start auto-scanner (pre-filter every N min)")
@@ -478,6 +509,7 @@ def main():
     print("\nWaiting for hotkey press...\n")
 
     # Register hotkeys
+    keyboard.add_hotkey(MINIMIZE_HOTKEY, on_minimize_toggle)
     keyboard.add_hotkey(CAPTURE_HOTKEY, on_capture)
     keyboard.add_hotkey(REFRESH_HOTKEY, on_refresh)
     keyboard.add_hotkey(SCAN_START_HOTKEY, on_scan_start)

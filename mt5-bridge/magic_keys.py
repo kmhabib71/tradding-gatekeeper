@@ -500,6 +500,10 @@ class MagicKeysApp:
         self.status_text = tk.StringVar(value="Ready")
         self.lines_active = False   # True when SL/TP lines are shown on chart
         self._poll_id = None        # tkinter after() ID for EA polling
+        self.minimized = False      # True when window is collapsed to title bar only
+        self._saved_geometry = None  # saved geometry string before minimize
+        self._hidden_widgets = []
+        self._hidden_pack_info = {}
 
         # Window drag state
         self._drag_x = 0
@@ -552,6 +556,43 @@ class MagicKeysApp:
         y = self.root.winfo_y() + event.y - self._drag_y
         self.root.geometry(f"+{x}+{y}")
 
+    # ------ Minimize / Restore ------
+    def _toggle_minimize(self):
+        """Collapse the window to just the title bar, or restore it."""
+        if self.minimized:
+            # Restore all hidden widgets in original order
+            for widget in self._hidden_widgets:
+                widget.pack(**self._hidden_pack_info[widget])
+            self._hidden_widgets = []
+            self._hidden_pack_info = {}
+            self.min_btn.config(text=" \u2014 ")
+            # Restore saved geometry
+            if self._saved_geometry:
+                self.root.geometry(self._saved_geometry)
+            self.minimized = False
+        else:
+            # Save current geometry before collapsing
+            self.root.update_idletasks()
+            self._saved_geometry = self.root.geometry()
+            # Hide everything except the title bar (first child)
+            children = self.root.pack_slaves()
+            self._hidden_widgets = []
+            self._hidden_pack_info = {}
+            for child in children[1:]:  # skip title_frame (index 0)
+                # Save pack info before hiding
+                info = child.pack_info()
+                self._hidden_pack_info[child] = {
+                    k: v for k, v in info.items() if k != 'in'
+                }
+                self._hidden_widgets.append(child)
+                child.pack_forget()
+            self.min_btn.config(text=" \u25a1 ")
+            # Force a compact size — just the title bar width, pinned at current position
+            x = self.root.winfo_x()
+            y = self.root.winfo_y()
+            self.root.geometry(f"200x28+{x}+{y}")
+            self.minimized = True
+
     # ------ UI Building ------
     def _build_ui(self):
         # Colors matching the physical keypad
@@ -581,11 +622,20 @@ class MagicKeysApp:
         close_btn.pack(side=tk.RIGHT, padx=2)
         close_btn.bind("<Button-1>", lambda e: self._on_close())
 
-        # Make title bar draggable
+        self.min_btn = tk.Label(
+            title_frame, text=" \u2014 ", font=("Segoe UI", 9, "bold"),
+            bg="#111111", fg="#666666", cursor="hand2"
+        )
+        self.min_btn.pack(side=tk.RIGHT, padx=0)
+        self.min_btn.bind("<Button-1>", lambda e: self._toggle_minimize())
+
+        # Make title bar draggable + double-click to restore
         title_frame.bind("<Button-1>", self._start_drag)
         title_frame.bind("<B1-Motion>", self._do_drag)
+        title_frame.bind("<Double-Button-1>", lambda e: self._toggle_minimize())
         title_lbl.bind("<Button-1>", self._start_drag)
         title_lbl.bind("<B1-Motion>", self._do_drag)
+        title_lbl.bind("<Double-Button-1>", lambda e: self._toggle_minimize())
 
         # Status bar
         status_frame = tk.Frame(self.root, bg="#111111", height=22)
